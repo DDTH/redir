@@ -1,5 +1,6 @@
 package com.github.ddth.com.redir;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -270,7 +271,7 @@ public class RedisDirectory extends BaseDirectory {
     public IndexInput openInput(String name, IOContext ioContext) throws IOException {
         FileInfo fileInfo = getFileInfo(name);
         if (fileInfo == null) {
-            throw new IOException("File [" + name + "] not found!");
+            throw new FileNotFoundException("File [" + name + "] not found!");
         }
         return new RedisIndexInput(this, fileInfo);
     }
@@ -312,7 +313,7 @@ public class RedisDirectory extends BaseDirectory {
     public long fileLength(String name) throws IOException {
         FileInfo fileInfo = getFileInfo(name);
         if (fileInfo == null) {
-            throw new IOException("File [" + name + "] not found!");
+            throw new FileNotFoundException("File [" + name + "] not found!");
         }
         return fileInfo.size();
     }

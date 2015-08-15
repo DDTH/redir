@@ -9,7 +9,7 @@
 
 	<groupId>com.github.ddth</groupId>
 	<artifactId>redir</artifactId>
-	<version>0.1.1-SNAPSHOT</version>
+	<version>0.1.1</version>
 	<packaging>jar</packaging>
 
 	<name>redir</name>

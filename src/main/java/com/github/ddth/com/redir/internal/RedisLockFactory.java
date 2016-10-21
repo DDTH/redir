@@ -21,12 +21,14 @@ public class RedisLockFactory extends LockFactory {
 
     /**
      * {@inheritDoc}
+     * 
+     * @since 0.1.2 renamed {@code makeLock} to {@code obtainLock}
      */
     @Override
-    public Lock makeLock(Directory dir, String lockName) {
+    public Lock obtainLock(Directory dir, String lockName) {
         if (!(dir instanceof RedisDirectory)) {
-            throw new IllegalArgumentException("Expect argument of type ["
-                    + RedisDirectory.class.getName() + "]!");
+            throw new IllegalArgumentException(
+                    "Expect argument of type [" + RedisDirectory.class.getName() + "]!");
         }
         RedisDirectory reDir = (RedisDirectory) dir;
         return reDir.createLock(lockName);

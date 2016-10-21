@@ -8,9 +8,12 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.UUID;
 import java.util.zip.CRC32;
 
 import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.BaseDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
@@ -20,11 +23,11 @@ import org.apache.lucene.store.Lock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.ddth.com.redir.internal.RedisLockFactory;
+
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
-
-import com.github.ddth.com.redir.internal.RedisLockFactory;
 
 /**
  * Redis implementation of {@link Directory}.
@@ -174,8 +177,9 @@ public class RedisDirectory extends BaseDirectory {
         final String KEY = keyDataBlock(fileInfo, blockNum);
         try (Jedis jedis = getJedis()) {
             byte[] dataArr = jedis.hget(hashFileData, KEY.getBytes());
-            return dataArr != null ? (dataArr.length >= BLOCK_SIZE ? dataArr : Arrays.copyOf(
-                    dataArr, BLOCK_SIZE)) : null;
+            return dataArr != null
+                    ? (dataArr.length >= BLOCK_SIZE ? dataArr : Arrays.copyOf(dataArr, BLOCK_SIZE))
+                    : null;
         }
     }
 
@@ -376,19 +380,19 @@ public class RedisDirectory extends BaseDirectory {
     private class RedisLock extends Lock {
 
         private FileInfo fileInfo;
+        private boolean locked = false;
+        private String uuid = UUID.randomUUID().toString();
 
         public RedisLock(String fileName) {
             fileInfo = FileInfo.newInstance(fileName);
+            fileInfo.id(uuid);
+            locked = obtain();
         }
 
-        /**
-         * {@inheritDoc}
-         */
-        @Override
-        public boolean obtain() throws IOException {
+        private boolean obtain() {
             final String KEY = keyFileInfo(fileInfo);
             try (Jedis jedis = getJedis()) {
-                Long result = jedis.hincrBy(hashDirectoryMetadata, KEY.getBytes(), 1);
+                Long result = jedis.hset(hashDirectoryMetadata, KEY.getBytes(), fileInfo.asBytes());
                 return result != null && result.longValue() == 1;
             }
         }
@@ -398,20 +402,35 @@ public class RedisDirectory extends BaseDirectory {
          */
         @Override
         public void close() throws IOException {
-            final String KEY = keyFileInfo(fileInfo);
-            try (Jedis jedis = getJedis()) {
-                jedis.hdel(hashDirectoryMetadata, KEY.getBytes());
+            if (locked) {
+                final String KEY = keyFileInfo(fileInfo);
+                try (Jedis jedis = getJedis()) {
+                    jedis.hdel(hashDirectoryMetadata, KEY.getBytes());
+                }
+                locked = false;
             }
         }
 
         /**
          * {@inheritDoc}
+         * 
+         * @since 0.1.2
          */
         @Override
-        public boolean isLocked() throws IOException {
+        public void ensureValid() throws IOException {
+            if (!locked) {
+                throw new AlreadyClosedException(
+                        "Lock instance is not held or already released: " + this);
+            }
+
             final String KEY = keyFileInfo(fileInfo);
             try (Jedis jedis = getJedis()) {
-                return jedis.hget(hashDirectoryMetadata, KEY.getBytes()) != null;
+                byte[] value = jedis.hget(hashDirectoryMetadata, KEY.getBytes());
+                FileInfo fileInfo = FileInfo.newInstance(value);
+                if (fileInfo == null || !StringUtils.equals(fileInfo.id(), this.fileInfo.id())) {
+                    throw new AlreadyClosedException(
+                            "Lock invalidated or is held by an external force: " + this);
+                }
             }
         }
     }
@@ -490,8 +509,8 @@ public class RedisDirectory extends BaseDirectory {
             }
             long t2 = System.currentTimeMillis();
             if (LOGGER.isTraceEnabled()) {
-                LOGGER.trace("writeBytes[" + fileInfo.name() + "/" + offset + "/" + length
-                        + "] in " + (t2 - t1) + " ms");
+                LOGGER.trace("writeBytes[" + fileInfo.name() + "/" + offset + "/" + length + "] in "
+                        + (t2 - t1) + " ms");
             }
         }
 
@@ -617,13 +636,13 @@ public class RedisDirectory extends BaseDirectory {
         @Override
         public void seek(long pos) throws IOException {
             if (pos < 0 || pos + offset > end) {
-                throw new IllegalArgumentException("Seek position is out of range [0," + length()
-                        + "]!");
+                throw new IllegalArgumentException(
+                        "Seek position is out of range [0," + length() + "]!");
             }
 
             if (LOGGER.isTraceEnabled()) {
-                String logMsg = "seek(" + fileInfo.name() + "," + isSlice + "," + offset + "/"
-                        + end + "," + pos + ") is called";
+                String logMsg = "seek(" + fileInfo.name() + "," + isSlice + "," + offset + "/" + end
+                        + "," + pos + ") is called";
                 LOGGER.trace(logMsg);
             }
 
@@ -647,8 +666,8 @@ public class RedisDirectory extends BaseDirectory {
                 LOGGER.trace(logMsg);
             }
             if (offset < 0 || length < 0 || offset + length > this.length()) {
-                throw new IllegalArgumentException("slice(" + sliceDescription + ") "
-                        + " out of bounds: " + this);
+                throw new IllegalArgumentException(
+                        "slice(" + sliceDescription + ") " + " out of bounds: " + this);
             }
             RedisIndexInput clone = new RedisIndexInput(sliceDescription, this, offset, length);
             clone.isSlice = true;

@@ -1,3 +1,5 @@
+**This project is no longer active. See its [descendant](https://github.com/DDTH/ddth-lucext) if you are looking for Redis implementation of Lucene's Directory**
+
 redir
 =====
 
